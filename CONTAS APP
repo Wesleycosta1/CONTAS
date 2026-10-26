@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle Financeiro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-gray-100 font-sans text-gray-800 p-4 md:p-8">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // COLOQUE SUAS CHAVES DO FIREBASE AQUI
+    const firebaseConfig = {
+      apiKey: "AIzaSyBBqvJiB0XJJ85MtlulXFaItB-3nt3YoHY",
+      authDomain: "contasdecasa-a328d.firebaseapp.com",
+      projectId: "contasdecasa-a328d",
+      storageBucket: "contasdecasa-a328d.firebasestorage.app",
+      messagingSenderId: "1751485639",
+      appId: "1:1751485639:web:e094c924a6dd1313b302e2",
+      measurementId: "G-J9NZ4Y6N95"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.firestore();
+    const { useState, useEffect } = React;
+
+    function App() {
+      const [transactions, setTransactions] = useState([]);
+      const [filter, setFilter] = useState('Todos');
+      const [formType, setFormType] = useState('expense');
+
+      const [description, setDescription] = useState('');
+      const [amount, setAmount] = useState('');
+      const [category, setCategory] = useState('Fixa');
+      const [sharedWithPrimo, setSharedWithPrimo] = useState(false);
+      const [currentInstallment, setCurrentInstallment] = useState('');
+      const [totalInstallments, setTotalInstallments] = useState('');
+
+      useEffect(() => {
+        const unsubscribe = db.collection('transactions')
+          .orderBy('createdAt', 'desc')
+          .onSnapshot(snapshot => {
+            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setTransactions(data);
+          });
+        return () => unsubscribe();
+      }, []);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!description || !amount) return;
+
+        db.collection('transactions').add({
+          type: formType,
+          description,
+          amount: parseFloat(amount),
+          category: formType === 'expense' ? category : 'Receita',
+          sharedWithPrimo: formType === 'expense' ? sharedWithPrimo : false,
+          currentInstallment: formType === 'expense' && category === 'Parcelada' ? parseInt(currentInstallment) : null,
+          totalInstallments: formType === 'expense' && category === 'Parcelada' ? parseInt(totalInstallments) : null,
+          status: 'Pendente',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        setDescription(''); setAmount(''); setSharedWithPrimo(false);
+        setCurrentInstallment(''); setTotalInstallments('');
+      };
+
+      const toggleStatus = (id, currentStatus) => {
+        db.collection('transactions').doc(id).update({ 
+          status: currentStatus === 'Pago' ? 'Pendente' : 'Pago' 
+        });
+      };
+
+      const deleteTransaction = (id) => {
+        db.collection('transactions').doc(id).delete();
+      };
+
+      const incomes = transactions.filter(t => t.type === 'income');
+      const expenses = transactions.filter(t => t.type === 'expense');
+      
+      const totalIncome = incomes.reduce((acc, curr) => acc + curr.amount, 0);
+      const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
+      const paidExpenses = expenses.filter(e => e.status === 'Pago').reduce((acc, curr) => acc + curr.amount, 0);
+      
+      const freeBalance = totalIncome - totalExpenses;
+      const currentBalance = totalIncome - paidExpenses;
+
+      const filteredTransactions = transactions.filter(t => {
+        if (filter === 'Todos') return true;
+        if (filter === 'Pendentes') return t.type === 'expense' && t.status !== 'Pago';
+        if (filter === 'Pagos') return t.type === 'expense' && t.status === 'Pago';
+        if (filter === 'Entradas') return t.type === 'income';
+        if (filter === 'Parcelas') return t.type === 'expense' && t.category === 'Parcelada';
+        return true;
+      });
+
+      return (
+        <div className="max-w-3xl mx-auto">
+          <h1 className="text-3xl font-bold text-center mb-8 text-blue-900">Controle Financeiro</h1>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-green-500">
+              <p className="text-sm text-gray-500">Entradas</p>
+              <p className="text-xl font-bold text-green-600">R$ {totalIncome.toFixed(2)}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-500">
+              <p className="text-sm text-gray-500">Gastos Totais</p>
+              <p className="text-xl font-bold text-red-600">R$ {totalExpenses.toFixed(2)}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-yellow-500">
+              <p className="text-sm text-gray-500">Saldo Atual</p>
+              <p className="text-xl font-bold text-yellow-600">R$ {currentBalance.toFixed(2)}</p>
+            </div>
+            <div className="bg-blue-600 p-4 rounded-xl shadow-sm text-white">
+              <p className="text-sm text-blue-100">Livre (Fim do Mês)</p>
+              <p className="text-xl font-bold">R$ {freeBalance.toFixed(2)}</p>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="md:col-span-1 bg-white p-6 rounded-xl shadow-sm h-fit">
+              <div className="flex gap-2 mb-6">
+                <button onClick={() => setFormType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-medium ${formType === 'expense' ? 'bg-red-100 text-red-700' : 'bg-gray-100'}`}>🔻 Gasto</button>
+                <button onClick={() => setFormType('income')} className={`flex-1 py-2 rounded-lg text-sm font-medium ${formType === 'income' ? 'bg-green-100 text-green-700' : 'bg-gray-100'}`}>⬆️ Entrada</button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <input type="text" placeholder="Descrição" value={description} onChange={(e) => setDescription(e.target.value)} className="p-3 border rounded-lg" required />
+                <input type="number" placeholder="Valor (R$)" value={amount} onChange={(e) => setAmount(e.target.value)} className="p-3 border rounded-lg" step="0.01" required />
+                
+                {formType === 'expense' && (
+                  <>
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} className="p-3 border rounded-lg bg-white">
+                      <option value="Fixa">Conta Fixa</option>
+                      <option value="Variável">Gasto Variável</option>
+                      <option value="Parcelada">Compra Parcelada</option>
+                    </select>
+
+                    {category === 'Parcelada' && (
+                      <div className="flex gap-2">
+                        <input type="number" placeholder="Atual" value={currentInstallment} onChange={(e) => setCurrentInstallment(e.target.value)} className="p-3 border rounded-lg w-1/2" required />
+                        <input type="number" placeholder="Total" value={totalInstallments} onChange={(e) => setTotalInstallments(e.target.value)} className="p-3 border rounded-lg w-1/2" required />
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer p-2 bg-gray-50 border rounded-lg">
+                      <input type="checkbox" checked={sharedWithPrimo} onChange={(e) => setSharedWithPrimo(e.target.checked)} className="w-4 h-4" /> Dividido com Primo
+                    </label>
+                  </>
+                )}
+                <button type="submit" className={`p-3 rounded-lg text-white font-medium ${formType === 'expense' ? 'bg-red-500' : 'bg-green-500'}`}>➕ Adicionar</button>
+              </form>
+            </div>
+
+            <div className="md:col-span-2">
+              <div className="flex flex-wrap gap-2 mb-4">
+                {['Todos', 'Pendentes', 'Pagos', 'Entradas', 'Parcelas'].map(f => (
+                  <button key={f} onClick={() => setFilter(f)} className={`px-4 py-2 rounded-full text-sm font-medium ${filter === f ? 'bg-blue-900 text-white' : 'bg-white border'}`}>{f}</button>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {filteredTransactions.map(t => {
+                  const isEnding = t.category === 'Parcelada' && t.currentInstallment >= t.totalInstallments - 1;
+                  const isPaid = t.status === 'Pago';
+                  const isIncome = t.type === 'income';
+
+                  return (
+                    <div key={t.id} className={`flex items-center justify-between p-4 bg-white rounded-xl shadow-sm border-l-4 ${isIncome ? 'border-green-500' : isPaid ? 'border-gray-300 opacity-75' : 'border-blue-500'}`}>
+                      <div className="flex items-center gap-4">
+                        {!isIncome && (
+                          <button onClick={() => toggleStatus(t.id, t.status)} className="text-xl">{isPaid ? '✅' : '⚪'}</button>
+                        )}
+                        <div>
+                          <p className={`font-semibold ${isPaid && !isIncome ? 'line-through text-gray-500' : ''}`}>{t.description}</p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
+                            {!isIncome && <span className="px-2 py-1 bg-gray-100 rounded">{t.category}</span>}
+                            {t.category === 'Parcelada' && <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded">{t.currentInstallment}/{t.totalInstallments}</span>}
+                            {isEnding && <span className="px-2 py-1 bg-red-50 text-red-600 rounded">🔥 Terminando</span>}
+                            {t.sharedWithPrimo && <span className="px-2 py-1 bg-purple-50 text-purple-600 rounded">🤝 Primo</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className={`font-bold ${isIncome ? 'text-green-600' : isPaid ? 'text-gray-500 line-through' : ''}`}>
+                          {isIncome ? '+' : '-'} R$ {t.amount.toFixed(2)}
+                        </span>
+                        <button onClick={() => deleteTransaction(t.id)} className="text-gray-400 hover:text-red-500">🗑️</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
